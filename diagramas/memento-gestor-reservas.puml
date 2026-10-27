@@ -1,0 +1,159 @@
+@startuml memento-gestor-reservas
+title Patrón Memento – Gestor de Reservas de Viaje (diagrama de clases)
+
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+skinparam shadowing false
+skinparam nodesep 60
+skinparam ranksep 70
+skinparam classFontStyle bold
+hide circle
+
+' ------------------------------------------------------------
+' Participantes del patrón Memento
+' ------------------------------------------------------------
+
+class InterfazReserva <<Client>> {
+  + InterfazReserva(asistente: AsistenteReserva)
+  + alPresionarSiguiente(): void
+  + alPresionarAtras(): void
+  + alGuardarBorrador(etiqueta: String): void
+  + alRetomarBorrador(etiqueta: String): void
+}
+
+class AsistenteReserva <<Caretaker>> {
+  - limiteHistorial: int = 5 {readOnly}
+  + AsistenteReserva(reserva: ReservaViaje)
+  + avanzar(): void
+  + retroceder(): void
+  + puedeRetroceder(): boolean
+  + guardarBorradorNombrado(etiqueta: String): void
+  + retomarBorrador(etiqueta: String): void
+}
+
+class ReservaViaje <<Originator>> {
+  - id: String
+  - pasoActual: Paso
+  - /precioTotal: BigDecimal
+  + ReservaViaje(id: String, titular: Pasajero)
+  + agregarPasajero(pasajero: Pasajero): void
+  + establecerVuelo(vuelo: Vuelo): void
+  + asignarAsiento(pasajero: Pasajero, asiento: Asiento): void
+  + agregarExtra(extra: Extra): void
+  + obtenerPasoActual(): Paso
+  + obtenerPrecioTotal(): BigDecimal
+  + siguientePaso(): void
+  + guardarBorrador(etiqueta: String): Borrador
+  + restaurar(borrador: Borrador): void
+  - recalcularPrecio(): void
+  - validarInvariantes(): void
+}
+
+interface Borrador <<Memento (interfaz estrecha)>> {
+  + obtenerPaso(): Paso
+  + obtenerFechaCreacion(): Instant
+  + obtenerEtiqueta(): String
+}
+
+class BorradorReserva <<Memento (interfaz amplia)>> {
+  - pasoActual: Paso {readOnly}
+  - fechaCreacion: Instant {readOnly}
+  - etiqueta: String {readOnly}
+  - pasajeros: Pasajero [1..*] {readOnly, ordered}
+  - vuelo: Vuelo [0..1] {readOnly}
+  - asignaciones: AsignacionAsiento [0..*] {readOnly}
+  - extras: Extra [0..*] {readOnly}
+  ~ BorradorReserva(reserva: ReservaViaje, etiqueta: String)
+  + obtenerPaso(): Paso
+  + obtenerFechaCreacion(): Instant
+  + obtenerEtiqueta(): String
+}
+
+' ------------------------------------------------------------
+' Clases del dominio (estado capturado por el memento)
+' ------------------------------------------------------------
+
+enum Paso <<enumeration>> {
+  PASAJERO
+  VUELO
+  ASIENTOS
+  EXTRAS
+  PAGO
+}
+
+enum Tarifa <<enumeration>> {
+  ECONOMICA
+  FLEXIBLE
+  PREMIUM
+}
+
+class Pasajero <<value object>> {
+  - nombre: String {readOnly}
+  - documento: String {readOnly}
+}
+
+class Vuelo <<value object>> {
+  - codigo: String {readOnly}
+  - origen: String {readOnly}
+  - destino: String {readOnly}
+  - fecha: LocalDate {readOnly}
+  - tarifa: Tarifa {readOnly}
+}
+
+class Asiento <<value object>> {
+  - codigo: String {readOnly}
+}
+
+class Extra <<value object>> {
+  - descripcion: String {readOnly}
+  - precio: BigDecimal {readOnly}
+}
+
+class AsignacionAsiento <<value object>> {
+}
+
+' ------------------------------------------------------------
+' Relaciones del patrón
+' ------------------------------------------------------------
+
+InterfazReserva --> "1" AsistenteReserva : - asistente
+AsistenteReserva --> "1" ReservaViaje : - reserva
+AsistenteReserva --> "0..5" Borrador : - historial {ordered}
+AsistenteReserva --> "0..*" Borrador : - borradoresNombrados
+
+BorradorReserva ..|> Borrador
+ReservaViaje +-- BorradorReserva
+ReservaViaje ..> BorradorReserva : <<create>>
+ReservaViaje ..> Borrador : <<use>>
+
+' ------------------------------------------------------------
+' Relaciones del dominio
+' ------------------------------------------------------------
+
+ReservaViaje *--> "1..*" Pasajero : - pasajeros {ordered}
+ReservaViaje *--> "0..*" AsignacionAsiento : - asignaciones
+ReservaViaje *--> "0..*" Extra : - extras
+ReservaViaje -->  "0..1" Vuelo : - vuelo
+ReservaViaje -->  "1" Paso : - pasoActual
+
+AsignacionAsiento --> "1" Pasajero
+AsignacionAsiento --> "1" Asiento
+Vuelo --> "1" Tarifa
+
+BorradorReserva ..> Paso
+BorradorReserva ..> Pasajero
+BorradorReserva ..> Vuelo
+BorradorReserva ..> AsignacionAsiento
+BorradorReserva ..> Extra
+
+note right of BorradorReserva
+  Clase anidada privada de ReservaViaje.
+  Solo el Originator accede a su contenido
+  (interfaz amplia); el Caretaker lo ve
+  únicamente como Borrador (interfaz estrecha).
+  Los elementos son inmutables, por lo que
+  copiar las colecciones basta para aislar
+  el snapshot del estado vivo.
+end note
+
+@enduml

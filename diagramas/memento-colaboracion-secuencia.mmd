@@ -1,0 +1,38 @@
+sequenceDiagram
+    autonumber
+    actor U as Usuario
+    participant UI as :InterfazReserva
+    participant A as :AsistenteReserva
+    participant R as :ReservaViaje
+
+    Note over U,R: Escenario 1 - Avanzar (captura del estado)
+    U->>UI: presiona Siguiente
+    UI->>A: avanzar()
+    A->>R: guardarBorrador(etiqueta)
+    create participant M as :BorradorReserva
+    R->>M: «create» new BorradorReserva(this, etiqueta)
+    Note right of M: copia inmutable del estado
+    R-->>A: Borrador
+    A->>R: siguientePaso()
+    A->>A: historial.push(borrador)
+
+    Note over U,R: Escenario 2 - Retroceder (restauración del estado)
+    U->>UI: presiona Atrás
+    UI->>A: retroceder()
+    A->>A: borrador = historial.pop()
+    A->>R: restaurar(borrador)
+    R->>M: lee el estado (interfaz amplia)
+    M-->>R: pasoActual, pasajeros, vuelo, asignaciones, extras
+    R->>R: recalcularPrecio()
+
+    Note over U,R: Escenario 3 - Guardar y retomar un borrador con nombre
+    U->>UI: guarda el borrador Plan A
+    UI->>A: guardarBorradorNombrado("Plan A")
+    A->>R: guardarBorrador("Plan A")
+    R-->>A: Borrador
+    A->>A: borradoresNombrados.put("Plan A", borrador)
+    U->>UI: retoma el borrador Plan A
+    UI->>A: retomarBorrador("Plan A")
+    A->>R: restaurar(borrador)
+    R->>R: recalcularPrecio()
+    A->>A: historial.clear()

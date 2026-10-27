@@ -1,0 +1,12 @@
+flowchart LR
+    UI["ui : InterfazReserva"]
+    A["asistente : AsistenteReserva"]
+    R["reserva : ReservaViaje"]
+    M["borrador : BorradorReserva"]
+
+    UI -- "1: avanzar()<br/>2: retroceder()" --> A
+
+    A -- "1.1: guardarBorrador(etiqueta)<br/>1.3: siguientePaso()<br/>2.2: restaurar(borrador)" --> R
+    R -- "1.1.1: «create» new BorradorReserva(this, etiqueta)<br/>2.2.1: lee el estado (interfaz amplia)" --> M
+
+    A -- "1.4: historial.push(borrador)<br/>2.1: historial.pop()" --> A
