@@ -480,50 +480,253 @@ La clase `App` recorre el flujo: avanza pasos, retrocede, guarda un borrador con
 
 ---
 
-## Patrón 02:
+## Patrón 02: Visitor — Paquete Turístico
 
 ### Escenario / Motivación
 
-Describa el problema seleccionado, el contexto en el que ocurre y las responsabilidades o interacciones entre objetos que generan la necesidad de aplicar el patrón.
+**Escenario.** La misma agencia en línea del Patrón 01 vende paquetes turísticos. Un paquete (`PaqueteTuristico`) agrupa servicios de distinto tipo:
+
+| Servicio | Datos propios |
+|---|---|
+| `ServicioVuelo` | Origen, destino, fecha, si es internacional, precio |
+| `ServicioHotel` | Hotel, ciudad, fecha de ingreso, noches, precio por noche |
+| `ServicioTraslado` | Origen, destino, fecha, precio |
+| `ServicioExcursion` | Nombre, fecha, personas, precio por persona |
+| `ServicioSeguro` | Cobertura, fecha de inicio, días, precio por día |
+
+Sobre el mismo paquete, distintas áreas de la agencia necesitan ejecutar operaciones que tratan cada servicio de forma diferente:
+
+- **Contabilidad:** calcular impuestos. Un vuelo internacional paga tasa aeroportuaria y está exento de IVA, un vuelo nacional paga IVA, un hotel paga IVA más una tasa turística por noche y un seguro paga una contribución propia.
+- **Marketing:** calcular puntos de fidelidad. Los vuelos acumulan por dólar (doble si son internacionales), los hoteles por noche, las excursiones por persona, y los traslados y seguros no acumulan.
+- **Operaciones:** generar el itinerario del viajero ordenado por fecha, con check-in y check-out del hotel.
+
+**Contexto.** La jerarquía de servicios es **estable**: la agencia vende estos cinco tipos desde hace años y rara vez incorpora uno nuevo. En cambio, las **operaciones crecen** con frecuencia. Después de las tres anteriores ya se piden otras: exportar al operador mayorista, calcular comisiones de agentes, generar el voucher en PDF o validar requisitos migratorios.
+
+**Responsabilidades e interacciones que generan el problema.**
+
+- **Los servicios** representan conceptos del dominio y conocen sus propios datos.
+- **El paquete** agrupa los servicios y permite recorrerlos.
+- **Cada operación** necesita un comportamiento distinto según el tipo concreto de servicio, y pertenece a un área distinta (contabilidad, marketing, operaciones).
+
+La tensión está en que cada operación depende del tipo concreto del servicio, pero no pertenece al servicio. Un `ServicioHotel` no debería saber cómo se calculan los puntos de marketing ni cómo exige su formato el operador mayorista.
 
 ### Problema de diseño identificado
 
-Explique qué dificultad presenta una solución directa y qué aspecto del comportamiento o de la interacción entre objetos necesita organizarse.
+**Solución directa típica.** Existen dos variantes y ambas fallan.
+
+*Variante A — un método por operación en cada servicio:*
+
+```java
+public interface ServicioTuristico {
+    BigDecimal calcularImpuesto();
+    int calcularPuntos();
+    String lineaItinerario();
+    String exportarOperador();   // operación nueva: hay que tocar las 5 clases
+}
+```
+
+*Variante B — condicionales por tipo en cada operación:*
+
+```java
+BigDecimal calcularImpuestos(PaqueteTuristico paquete) {
+    BigDecimal total = BigDecimal.ZERO;
+    for (ServicioTuristico s : paquete.getServicios()) {
+        if (s instanceof ServicioVuelo v) {
+            total = total.add(v.isInternacional()
+                    ? TASA : v.getPrecio().multiply(IVA));
+        } else if (s instanceof ServicioHotel h) {
+            total = total.add(h.getPrecio().multiply(IVA)
+                    .add(TASA_NOCHE.multiply(...)));
+        } else if (s instanceof ServicioTraslado t) {
+            // ...
+        } // si se olvida un tipo, no tributa
+    }
+    return total;
+}
+// La misma cadena se repite en calcularPuntos(),
+// generarItinerario()...
+```
+
+**Dificultades que presenta.**
+
+1. **Clases de dominio infladas (variante A).** Cada servicio acumula lógica de contabilidad, marketing y operaciones. Se viola la responsabilidad única, y las clases cambian por motivos ajenos a su concepto.
+2. **Cambios en cascada (variante A).** Cada operación nueva obliga a modificar las cinco clases de servicio y la interfaz. Se viola el principio abierto/cerrado.
+3. **Lógica dispersa (variante A).** Las reglas tributarias quedan repartidas en cinco archivos. Para entender o cambiar "cómo se calculan los impuestos" hay que recorrer toda la jerarquía.
+4. **Condicionales duplicados (variante B).** La cadena `if/instanceof` se repite en cada operación. El orden de las ramas importa y el código crece con cada operación.
+5. **Errores silenciosos (variante B).** Si una operación olvida un tipo, el compilador no avisa: el servicio simplemente no tributa o no acumula puntos.
+6. **Acoplamiento al recorrido.** Ambas variantes obligan a exponer la colección de servicios del paquete (`getServicios()`) para recorrerla desde fuera.
+
+**Aspecto que necesita organizarse.** Hay que separar las operaciones de la jerarquía de servicios, de modo que cada operación quede **completa en un solo lugar**, que agregar una nueva **no modifique los servicios** y que el compilador **garantice** que cada operación trata todos los tipos.
 
 ### Justificación del patrón
 
-Explique por qué el patrón seleccionado es adecuado para resolver el problema y qué alternativas fueron consideradas.
+**Por qué Visitor es adecuado.** Visitor representa una operación que se aplica sobre los elementos de una estructura de objetos y permite definir operaciones nuevas sin cambiar las clases de esos elementos. Es exactamente la combinación del escenario: jerarquía estable y operaciones que crecen.
+
+| Necesidad del problema | Cómo la resuelve Visitor |
+|---|---|
+| Agregar operaciones sin tocar los servicios | Cada operación es una clase nueva que implementa `VisitanteServicio`. |
+| Concentrar cada operación en un solo lugar | Todas las reglas de impuestos viven en `CalculadoraImpuestos`. |
+| Comportamiento distinto por tipo sin `instanceof` | Doble despacho: `servicio.aceptar(v)` llama a `v.visitarHotel(this)`, y el tipo concreto se resuelve por polimorfismo. |
+| Que el compilador detecte tipos olvidados | `VisitanteServicio` declara un método por tipo, y una clase que no los implemente todos no compila. |
+| No exponer la colección del paquete | `PaqueteTuristico.aceptar(v)` recorre sus servicios internamente. |
+| Acumular resultados durante el recorrido | El visitante guarda su estado (total, detalle, entradas) mientras recorre. |
+
+**Alternativas consideradas.**
+
+| Alternativa | Por qué se descartó |
+|---|---|
+| Un método por operación en cada servicio (variante A) | Infla las clases de dominio y obliga a modificar toda la jerarquía por cada operación nueva. |
+| `if/instanceof` en cada operación (variante B) | Duplica condicionales y no detecta tipos olvidados en compilación. |
+| **Strategy** por operación | Una estrategia recibiría un `ServicioTuristico` genérico y volvería a necesitar `instanceof` para distinguir el tipo. Strategy varía un algoritmo, no despacha por tipo. |
+| `sealed interface` + `switch` con *pattern matching* (Java 21) | Ofrece exhaustividad en compilación sin doble despacho y es una alternativa moderna válida. Se descartó porque el proyecto usa Java 17, donde esa característica es preliminar, y porque la actividad pide evidenciar el patrón GoF. |
+| Mapa `Class → función` | Evita los `if`, pero pierde la verificación en compilación y depende de registrar cada tipo a mano. |
+
+**Conclusión de la justificación.** Visitor ofrece la forma más clara de agregar operaciones sobre una jerarquía estable, con cada operación completa en una clase y verificada por el compilador. El costo es que agregar un tipo de servicio nuevo obliga a modificar todos los visitantes, algo aceptable porque en este dominio los tipos casi no cambian.
 
 ### Participantes del patrón
 
-Identifique los participantes GoF dentro de la solución propuesta:
+Participantes GoF dentro de la solución propuesta:
 
-- Participante 1 → ______________________________
-- Participante 2 → ______________________________
-- Participante 3 → ______________________________
-- Participante N → ______________________________
+- **Visitor** → `VisitanteServicio`
+- **ConcreteVisitor** → `CalculadoraImpuestos`, `CalculadoraPuntosFidelidad`, `GeneradorItinerario`
+- **Element** → `ServicioTuristico`
+- **ConcreteElement** → `ServicioVuelo`, `ServicioHotel`, `ServicioTraslado`, `ServicioExcursion`, `ServicioSeguro`
+- **ObjectStructure** → `PaqueteTuristico`
+- **Client** → `App`
+
+**Responsabilidades de cada participante.**
+
+| Participante | Clase | Responsabilidades |
+|---|---|---|
+| Visitor | `VisitanteServicio` | Declara una operación `visitarX(...)` por cada tipo concreto de servicio. Es el contrato que obliga a tratar todos los tipos. |
+| ConcreteVisitor | `CalculadoraImpuestos` | Aplica la regla tributaria de cada tipo de servicio y acumula el total y el detalle. |
+| ConcreteVisitor | `CalculadoraPuntosFidelidad` | Aplica la regla de acumulación de puntos de cada tipo y acumula el total. |
+| ConcreteVisitor | `GeneradorItinerario` | Convierte cada servicio en entradas fechadas y devuelve el itinerario ordenado. |
+| Element | `ServicioTuristico` | Declara `aceptar(VisitanteServicio)` y los datos comunes (`codigo()`, `precioBase()`). |
+| ConcreteElement | `ServicioVuelo`, `ServicioHotel`, etc. | Implementan `aceptar()` llamando al método del visitante que corresponde a su tipo (`visitante.visitarHotel(this)`). Conocen sus datos y sus invariantes (noches > 0, precio ≥ 0). |
+| ObjectStructure | `PaqueteTuristico` | Agrupa los servicios y los recorre en orden con `aceptar(visitante)`, sin exponer la colección. |
+| Client | `App` | Arma el paquete, crea el visitante de la operación que necesita, lo pasa al paquete y lee el resultado. |
+
+**Colaboración entre los objetos (doble despacho).**
+
+1. El cliente crea un visitante concreto, por ejemplo `CalculadoraImpuestos`, y llama a `paquete.aceptar(impuestos)`.
+2. El paquete recorre sus servicios y llama a `servicio.aceptar(impuestos)` en cada uno. **Primer despacho:** se resuelve el tipo concreto del servicio.
+3. Cada servicio llama al método del visitante que corresponde a su tipo, por ejemplo `impuestos.visitarHotel(this)`. **Segundo despacho:** se resuelve el tipo concreto del visitante.
+4. El visitante lee los datos del servicio que necesita y acumula el resultado.
+5. Al terminar el recorrido, el cliente le pide el resultado al visitante (`obtenerTotal()`).
+
+**Diagrama de secuencia.**
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as :App
+    participant P as :PaqueteTuristico
+    participant V as :ServicioVuelo
+    participant H as :ServicioHotel
+    participant I as :CalculadoraImpuestos
+
+    C->>I: «create» new CalculadoraImpuestos()
+    C->>P: aceptar(impuestos)
+    loop por cada servicio, en orden
+        P->>V: aceptar(impuestos)
+        Note right of V: primer despacho: tipo del elemento
+        V->>I: visitarVuelo(this)
+        Note right of I: segundo despacho: tipo del visitante
+        P->>H: aceptar(impuestos)
+        H->>I: visitarHotel(this)
+        I->>H: precioBase(), noches()
+        H-->>I: 600.00, 5
+    end
+    C->>I: obtenerTotal()
+    I-->>C: total de impuestos
+```
+
+La fuente está en `diagramas/visitor-colaboracion-secuencia.mmd`. La imagen exportada, para el PDF, está en `diagramas/visitor-colaboracion-secuencia.png`.
 
 ### Diagrama de clases UML
 
-*Insertar aquí el diagrama UML de la solución.*
+**Fuente del diagrama:** `diagramas/visitor-paquete-turistico.puml` (PlantUML).
 
-El diagrama debe mostrar:
+![Diagrama de clases UML del patrón Visitor – Paquete Turístico](diagramas/visitor-paquete-turistico.png)
 
-- clases e interfaces;
-- atributos y operaciones relevantes;
-- relaciones y navegabilidad cuando corresponda;
-- multiplicidades cuando aporten información;
-- correspondencia clara con los participantes del patrón.
+**Elementos de notación utilizados.**
+
+| Elemento UML | Uso en el diagrama |
+|---|---|
+| Estereotipos `«Visitor»`, `«ConcreteVisitor»`, `«Element»`, `«ConcreteElement»`, `«ObjectStructure»`, `«Client»` | Identifican los participantes del patrón. |
+| Realización (línea discontinua, triángulo hueco) | Los cinco servicios realizan `ServicioTuristico` y los tres visitantes realizan `VisitanteServicio`. |
+| Agregación dirigida con multiplicidad `0..*` y `{ordered}` | `PaqueteTuristico` agrupa servicios en orden. Es agregación y no composición porque un servicio puede existir y cotizarse fuera de un paquete. |
+| Dependencia `«use»` | `ServicioTuristico` y `PaqueteTuristico` reciben un `VisitanteServicio` como parámetro, sin guardarlo. |
+| Dependencia `«create»` | `App` instancia los visitantes concretos. |
+| Restricción `{readOnly}` | Los servicios son inmutables (`record` en Java). |
+| Notas | Indican el doble despacho en `aceptar()` y el costo de agregar un tipo nuevo. |
 
 ### Código fuente
 
-**Repositorio / enlace:**
+**Repositorio / enlace:** https://github.com/cristian-espinoza-developer/patrones-comportamiento/tree/main/visitor-paquete-turistico (proyecto Maven, Java 17).
+
+**Correspondencia UML–código.**
+
+| Participante / elemento UML | Clase Java |
+|---|---|
+| Visitor | `visitantes.VisitanteServicio` (interfaz) |
+| ConcreteVisitor | `visitantes.CalculadoraImpuestos`, `visitantes.CalculadoraPuntosFidelidad`, `visitantes.GeneradorItinerario` |
+| Element | `dominio.ServicioTuristico` (interfaz) |
+| ConcreteElement | `dominio.ServicioVuelo`, `ServicioHotel`, `ServicioTraslado`, `ServicioExcursion`, `ServicioSeguro` (`record`) |
+| ObjectStructure | `dominio.PaqueteTuristico` |
+| Client | `App` |
+
+**Ejecución de la demostración** (requiere JDK 17 o superior):
+
+```bash
+cd visitor-paquete-turistico
+mvn compile exec:java
+```
+
+La clase `App` arma un paquete Quito–Cancún con siete servicios agregados fuera de orden y aplica los tres visitantes sobre el mismo paquete: impuestos con su detalle, puntos de fidelidad e itinerario ordenado por fecha. Al final muestra el precio base, los impuestos y el total a pagar. Las tasas tributarias están simplificadas para la demostración.
+
+### Validación de la solución
+
+**Qué problema resolvió.** Permite ejecutar operaciones distintas sobre los servicios del paquete (impuestos, puntos e itinerario), cada una con un comportamiento propio por tipo de servicio, sin modificar las clases de servicio y sin condicionales por tipo.
+
+**Qué mejoró respecto de una solución directa.**
+
+| Aspecto | Solución directa | Con Visitor |
+|---|---|---|
+| Agregar una operación | Modificar las 5 clases de servicio (variante A) o escribir otra cadena de `instanceof` (variante B). | Crear una clase que implemente `VisitanteServicio`. Los servicios no se tocan. |
+| Cohesión | Reglas de impuestos repartidas en 5 archivos, o mezcladas con otras operaciones. | Cada operación completa en una sola clase. |
+| Seguridad de tipos | Un tipo olvidado en un `instanceof` falla en silencio. | El compilador exige implementar `visitarX` para todos los tipos. |
+| Responsabilidades | Los servicios cargan lógica de contabilidad, marketing y operaciones. | Los servicios solo conocen sus datos. Cada área tiene su visitante. |
+| Encapsulamiento del paquete | Hay que exponer la colección para recorrerla. | `PaqueteTuristico.aceptar()` recorre internamente. |
+
+**Qué costos o complejidad adicional introdujo.**
+
+- **Agregar un tipo de servicio es caro.** Un `ServicioCrucero` obliga a añadir `visitarCrucero()` a la interfaz y a **todos** los visitantes concretos. Es la contracara del beneficio: Visitor facilita agregar operaciones a cambio de dificultar agregar tipos.
+- **Exposición del estado de los elementos.** Los visitantes necesitan leer los datos de cada servicio, así que los servicios deben exponerlos. Aquí es aceptable porque son `record` inmutables, pero con elementos mutables se debilitaría el encapsulamiento.
+- **Dependencia cíclica entre paquetes.** `dominio` conoce a `VisitanteServicio` (en `aceptar`) y `visitantes` conoce a los servicios concretos. Es inherente al doble despacho.
+- **Indirección.** El flujo `paquete → servicio.aceptar → visitante.visitarX` es menos evidente que una llamada directa, y cuesta más seguirlo al depurar.
+- **Visitantes con estado.** Cada visitante acumula resultados, así que se crea uno nuevo por cálculo. Reutilizarlo sumaría resultados de dos paquetes.
+- **Operaciones uniformes fuera del patrón.** El precio base se calcula igual para todos los servicios, por eso queda en `PaqueteTuristico.obtenerPrecioBase()` y no en un visitante. Usar Visitor ahí sería sobreingeniería.
+
+**En qué situación no se recomendaría usarlo.**
+
+- Cuando la jerarquía de elementos cambia con frecuencia, por ejemplo si la agencia agregara tipos de servicio cada mes. Cada tipo nuevo rompería todos los visitantes.
+- Cuando hay pocas operaciones y no se esperan más. Un método polimórfico en cada clase es más simple.
+- Cuando la operación es uniforme para todos los tipos, como sumar precios. No hay nada que despachar.
+- Cuando los elementos deben ocultar su estado interno. El visitante necesita leerlo.
+- En Java 21 o superior con jerarquías selladas. Un `switch` con *pattern matching* sobre una `sealed interface` da la misma verificación en compilación con menos código.
 
 ### Uso crítico de inteligencia artificial
 
-- **Prompt principal:**
-- **Recomendación aceptada y justificación:**
+**Usos de la IA como apoyo en este patrón.**
+
+- **Prompt principal:** "Vamos a desarrollar el escenario 2 aplicando el patrón Visitor (asignado por el docente). Hemos definido estructurarlo sobre el escenario de un 'Paquete Turístico' para mantener la coherencia con el dominio de agencia de viajes del Patrón 01. Genera el andamiaje (boilerplate) del código y un borrador del diagrama UML considerando las restricciones que hemos establecido: una jerarquía de elementos estable (vuelos, hoteles, etc.) y operaciones variables (cálculo de impuestos, acumulación de puntos). Mantén las convenciones arquitectónicas y de nomenclatura de nuestro escenario anterior."
+- **Recomendación aceptada y justificación:** El equipo propuso el escenario de "Paquete Turístico" y utilizó la IA para validar su viabilidad técnica frente a las restricciones del patrón. Se aceptó el análisis de la IA que confirmaba la idoneidad del diseño, ya que cumplía con las dos condiciones estructurales de Visitor: una jerarquía de servicios estable y operaciones externas que pueden escalar. Adicionalmente, el análisis de la IA ayudó a estructurar teóricamente los límites del patrón (evidenciando que agregar un nuevo tipo de servicio rompería las interfaces de todos los visitantes), lo cual el equipo incorporó directamente en la sección de validación del documento.
 - **Recomendación modificada o rechazada y justificación:**
+  - *Rechazada.* Durante la fase exploratoria, la IA sugirió analizar arquitecturas basadas en comportamiento e iteración, proponiendo Chain of Responsibility como alternativa teórica para contrastar con el manejo de estado de Memento. El equipo rechazó tajantemente esta desviación, ya que la directriz académica exigía específicamente aplicar el patrón Visitor. Se instruyó a la herramienta descartar otras opciones y enfocarse en el Double Dispatch.
+  - *Modificada.* A partir del código estructurado por el equipo, la IA generó un borrador del diagrama UML que presentaba un error arquitectónico: trazó una dependencia «create» desde la clase App hacia la interfaz VisitanteServicio. El equipo revisó y corrigió este defecto (reconociendo que una interfaz no puede ser instanciada), modificando el modelo para que las dependencias «create» apuntaran correctamente a cada visitante concreto, logrando así total fidelidad con el código real.
+  - *No adoptada.* Como optimización, la IA propuso refactorizar el código utilizando características modernas de Java 21, específicamente sealed interfaces combinadas con pattern matching en estructuras switch. El equipo decidió no adoptar esta implementación para mantener la compatibilidad estricta con Java 17 (estándar definido en el Patrón 01) y para asegurar que la entrega evidenciara claramente la estructura clásica del patrón delineada por el GoF (Gang of Four). Esta alternativa fue documentada en la justificación solo como un posible trabajo futuro.
 
 ---
 
@@ -532,6 +735,10 @@ El diagrama debe mostrar:
 ### Patrón Memento (89 palabras)
 
 El patrón Memento permitió separar la captura y restauración del estado de la reserva de las reglas que lo protegen. El Caretaker gestiona el historial sin conocer el contenido de los borradores, y el Originator recalcula los datos derivados al restaurar, evitando estados inconsistentes. Añadir atributos a la reserva solo afecta a la reserva y a su memento. A cambio, introduce más clases y consumo de memoria, y no restaura recursos externos como el inventario de asientos. Es adecuado con estados pequeños y encapsulados; con estados grandes conviene Command.
+
+### Patrón Visitor (111 palabras)
+
+El patrón Visitor permitió agregar operaciones sobre el paquete turístico (impuestos, puntos de fidelidad e itinerario) sin modificar las clases de servicio. Cada operación quedó completa en su propia clase, y el doble despacho reemplazó las cadenas de instanceof, de modo que el compilador obliga a tratar todos los tipos. Las operaciones uniformes, como el precio base, se mantuvieron fuera del patrón para evitar sobreingeniería. A cambio, los servicios deben exponer sus datos a los visitantes y aparece una dependencia cíclica entre paquetes. Su mayor costo es la rigidez ante tipos nuevos: un servicio adicional obliga a modificar todos los visitantes. Conviene cuando la jerarquía es estable y las operaciones crecen.
 
 ---
 

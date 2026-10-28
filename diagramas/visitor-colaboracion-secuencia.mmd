@@ -1,0 +1,22 @@
+sequenceDiagram
+    autonumber
+    participant C as :App
+    participant P as :PaqueteTuristico
+    participant V as :ServicioVuelo
+    participant H as :ServicioHotel
+    participant I as :CalculadoraImpuestos
+
+    C->>I: «create» new CalculadoraImpuestos()
+    C->>P: aceptar(impuestos)
+    loop por cada servicio, en orden
+        P->>V: aceptar(impuestos)
+        Note right of V: primer despacho: tipo del elemento
+        V->>I: visitarVuelo(this)
+        Note right of I: segundo despacho: tipo del visitante
+        P->>H: aceptar(impuestos)
+        H->>I: visitarHotel(this)
+        I->>H: precioBase(), noches()
+        H-->>I: 600.00, 5
+    end
+    C->>I: obtenerTotal()
+    I-->>C: total de impuestos

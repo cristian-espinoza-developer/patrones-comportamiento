@@ -1,0 +1,153 @@
+@startuml visitor-paquete-turistico
+title Patrón Visitor – Paquete Turístico (diagrama de clases)
+
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam nodesep 60
+skinparam ranksep 70
+skinparam classFontStyle bold
+hide circle
+left to right direction
+
+' ------------------------------------------------------------
+' Client y ObjectStructure
+' ------------------------------------------------------------
+class App <<Client>> {
+  + {static} main(args: String[]): void
+}
+
+class PaqueteTuristico <<ObjectStructure>> {
+  - codigo: String {readOnly}
+  - titular: String {readOnly}
+  + PaqueteTuristico(codigo: String, titular: String)
+  + agregarServicio(servicio: ServicioTuristico): void
+  + aceptar(visitante: VisitanteServicio): void
+  + obtenerPrecioBase(): BigDecimal
+  + cantidadServicios(): int
+}
+
+' ------------------------------------------------------------
+' Element y ConcreteElements (jerarquía estable)
+' ------------------------------------------------------------
+interface ServicioTuristico <<Element>> {
+  + codigo(): String
+  + precioBase(): BigDecimal
+  + aceptar(visitante: VisitanteServicio): void
+}
+
+class ServicioVuelo <<ConcreteElement>> {
+  - codigo: String {readOnly}
+  - origen: String {readOnly}
+  - destino: String {readOnly}
+  - fecha: LocalDate {readOnly}
+  - internacional: boolean {readOnly}
+  - precioBase: BigDecimal {readOnly}
+  + aceptar(visitante: VisitanteServicio): void
+}
+
+class ServicioHotel <<ConcreteElement>> {
+  - codigo: String {readOnly}
+  - nombre: String {readOnly}
+  - ciudad: String {readOnly}
+  - fechaIngreso: LocalDate {readOnly}
+  - noches: int {readOnly}
+  - precioNoche: BigDecimal {readOnly}
+  + fechaSalida(): LocalDate
+  + precioBase(): BigDecimal
+  + aceptar(visitante: VisitanteServicio): void
+}
+
+class ServicioTraslado <<ConcreteElement>> {
+  - codigo: String {readOnly}
+  - origen: String {readOnly}
+  - destino: String {readOnly}
+  - fecha: LocalDate {readOnly}
+  - precioBase: BigDecimal {readOnly}
+  + aceptar(visitante: VisitanteServicio): void
+}
+
+class ServicioExcursion <<ConcreteElement>> {
+  - codigo: String {readOnly}
+  - nombre: String {readOnly}
+  - fecha: LocalDate {readOnly}
+  - personas: int {readOnly}
+  - precioPorPersona: BigDecimal {readOnly}
+  + precioBase(): BigDecimal
+  + aceptar(visitante: VisitanteServicio): void
+}
+
+class ServicioSeguro <<ConcreteElement>> {
+  - codigo: String {readOnly}
+  - cobertura: String {readOnly}
+  - fechaInicio: LocalDate {readOnly}
+  - dias: int {readOnly}
+  - precioPorDia: BigDecimal {readOnly}
+  + precioBase(): BigDecimal
+  + aceptar(visitante: VisitanteServicio): void
+}
+
+' ------------------------------------------------------------
+' Visitor y ConcreteVisitors (operaciones que crecen)
+' ------------------------------------------------------------
+interface VisitanteServicio <<Visitor>> {
+  + visitarVuelo(vuelo: ServicioVuelo): void
+  + visitarHotel(hotel: ServicioHotel): void
+  + visitarTraslado(traslado: ServicioTraslado): void
+  + visitarExcursion(excursion: ServicioExcursion): void
+  + visitarSeguro(seguro: ServicioSeguro): void
+}
+
+class CalculadoraImpuestos <<ConcreteVisitor>> {
+  - total: BigDecimal
+  - detalle: String [0..*] {ordered}
+  + obtenerTotal(): BigDecimal
+  + obtenerDetalle(): List<String>
+}
+
+class CalculadoraPuntosFidelidad <<ConcreteVisitor>> {
+  - totalPuntos: int
+  - detalle: String [0..*] {ordered}
+  + obtenerTotalPuntos(): int
+  + obtenerDetalle(): List<String>
+}
+
+class GeneradorItinerario <<ConcreteVisitor>> {
+  - entradas: Entrada [0..*]
+  + obtenerItinerario(): List<String>
+}
+
+note left of ServicioVuelo
+  visitante.visitarVuelo(this)
+  (doble despacho)
+end note
+
+note bottom of VisitanteServicio
+  Una operación nueva = una clase nueva
+  que implementa VisitanteServicio.
+  Un servicio nuevo = un método nuevo
+  aquí y en todos los ConcreteVisitor.
+end note
+
+' ------------------------------------------------------------
+' Relaciones
+' ------------------------------------------------------------
+App ..> PaqueteTuristico : <<use>>
+App ..> CalculadoraImpuestos : <<create>>
+App ..> CalculadoraPuntosFidelidad : <<create>>
+App ..> GeneradorItinerario : <<create>>
+
+PaqueteTuristico o--> "0..*" ServicioTuristico : - servicios {ordered}
+PaqueteTuristico ..> VisitanteServicio : <<use>>
+
+ServicioVuelo ..|> ServicioTuristico
+ServicioHotel ..|> ServicioTuristico
+ServicioTraslado ..|> ServicioTuristico
+ServicioExcursion ..|> ServicioTuristico
+ServicioSeguro ..|> ServicioTuristico
+
+ServicioTuristico ..> VisitanteServicio : <<use>>
+
+CalculadoraImpuestos ..|> VisitanteServicio
+CalculadoraPuntosFidelidad ..|> VisitanteServicio
+GeneradorItinerario ..|> VisitanteServicio
+@enduml
